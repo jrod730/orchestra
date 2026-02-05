@@ -141,6 +141,7 @@ Create ONE spec file: `.orchestra/specs/single-{slug}.spec.md`
 
 ## Testing Strategy
 - **Unit Tests**: [what to test at the unit level]
+- **Functional Tests**: [end-to-end user scenarios to verify the feature works as intended]
 - **Integration Tests**: [only if the feature connects multiple components, otherwise "N/A"]
 - **UI Tests**: [only if the feature has a UI component, otherwise "N/A"]
 
@@ -235,6 +236,9 @@ Each task file must contain:
 
 ## Unit Tests Required
 - [specific test cases with expected behavior — reference the spec's "Testing Strategy"]
+
+## Functional Tests Required
+- [end-to-end scenarios that verify the task delivers its intended user-facing behavior]
 
 ## Integration Tests Required
 - [only if the spec's testing strategy includes integration tests, otherwise "N/A"]

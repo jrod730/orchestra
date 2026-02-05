@@ -81,6 +81,9 @@ Each task file must contain:
 ## Unit Tests Required
 - [specific test cases with expected behavior — reference the spec's "Testing Strategy"]
 
+## Functional Tests Required
+- [end-to-end scenarios that verify the task delivers its intended user-facing behavior]
+
 ## Integration Tests Required
 - [only if the spec's testing strategy includes integration tests, otherwise "N/A"]
 
