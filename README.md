@@ -1,199 +1,287 @@
-# 🎵 Orchestra v2.0
+# Orchestra
 
-**Autonomous, specification-driven multi-agent development pipeline for Claude Code.**
-
-Orchestra coordinates specialized AI agents through a complete software development lifecycle — planning, task decomposition, development, code review, testing, integration testing, and retrospectives — with zero human intervention.
-
-Built for **Claude Opus 4.5** running through **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)**.
-
----
-
-## What's New in v2.0
-
-- **Single Feature Builder** — paste a feature description, get it built end-to-end
-- **Multi Feature Builder** — point at your docs folder, build the whole project
-- **Zero permission prompts** — the orchestrator never asks "should I proceed?"
-- **UI Developer Agent** — dedicated agent for frontend/UI work with Playwright-testable output
-- **UI Tester Agent** — uses Playwright MCP server for automated browser testing, no human interaction
-- **Integration Tester Agent** — tests cross-component boundaries per feature
-- **UI detection during planning** — specs and features flag `has_ui` and `integration_required` early
-- **Per-type signal directories** — signals organized by type (dev/, review/, test/, etc.) for readability
-- **Integration testing in pipeline** — Phase 4.5 runs after all feature tasks pass, before AAR
-- **Playwright test plans in task files** — task builder creates specific test scenarios for UI tasks
-
----
-
-## How It Works
-
-Orchestra runs on three primitives:
-
-### Shell Script Brain (`orchestra.sh`)
-The decision engine. Reads project state from signal files, determines the next action, and outputs structured commands.
-
-### Signal-Based State Management
-Agents communicate through signal files organized by type:
-```
-.orchestra/signals/
-├── dev/          # dev-01-01-login-complete.signal
-├── review/       # review-01-01-login-complete.signal
-├── test/         # test-01-01-login-complete.signal
-├── integration/  # 01-auth-complete.signal
-├── planning/     # planning-complete.signal
-├── feature/      # features-complete.signal
-├── task/         # tasks-01-auth-complete.signal
-└── aar/          # aar-01-auth-complete.signal
-```
-
-### On-Demand Agent Prompts
-Ten agent prompts live in `agents/` and are loaded only when spawned — never embedded in the orchestrator's context.
-
----
-
-## The Pipeline
-
-```
-Phase 1: PLANNING        → Constitution + Component Specs (flags UI + integration)
-Phase 2: FEATURES         → Sequenced, dependency-aware features (with test plans)
-Phase 3: TASKS            → Atomic tasks with Playwright plans + integration criteria
-Phase 4: DEV LOOP         → Develop → Review → Test (per task, UI-aware)
-Phase 4.5: INTEGRATION    → Cross-component integration tests (per feature)
-Phase 5: AAR              → After Action Reports with full metrics
-```
-
-### Phase 4 State Machine (Per Task)
-
-```
-Happy Path:
-  [no signals] → dev:COMPLETE → review:APPROVED → test:PASSED ✅
-
-UI Task Path:
-  [no signals] → ui-dev:COMPLETE → review:APPROVED (checks data-testid) → ui-test:PASSED ✅
-
-Review Rejection:
-  dev:COMPLETE → review:REJECTED → dev:FIXED → cleanup → fresh review
-
-Test Failure:
-  review:APPROVED → test:FAILED → dev:FIXED → cleanup → fresh review + test
-
-Escalation:
-  3+ cycles → ESCALATE to user
-```
-
----
-
-## Agents
-
-| Agent | Role | Signal Directory |
-| --- | --- | --- |
-| **Planning** | Constitution + specs (flags UI/integration) | `signals/planning/` |
-| **Feature** | Decomposes specs into features with test plans | `signals/feature/` |
-| **Task Builder** | Creates tasks with Playwright plans + integration criteria | `signals/task/` |
-| **Developer** | Backend code + unit tests (fresh/review-fix/test-fix modes) | `signals/dev/` |
-| **UI Developer** | Frontend code with `data-testid` attributes | `signals/dev/` |
-| **Code Reviewer** | Reviews code, integration steps, UI testability | `signals/review/` |
-| **Tester** | Functional tests for non-UI tasks | `signals/test/` |
-| **UI Tester** | Playwright browser tests for UI tasks | `signals/test/` |
-| **Integration Tester** | Cross-component boundary tests per feature | `signals/integration/` |
-| **Task Reviewer** | After Action Reports with full metrics | `signals/aar/` |
-
----
+Specification-driven development orchestration for Claude Code. Spawns specialized sub-agents that do all the work while keeping the main thread lightweight.
 
 ## Quick Start
 
-### Prerequisites
-- **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** installed
-- **Claude Max / Pro / Team / Enterprise** subscription
-
-### Option A: Build a Single Feature
-
 ```bash
-# Copy orchestra files to your project
-cp -r /path/to/orchestra/orchestra.sh .
-cp -r /path/to/orchestra/agents ./agents
+# Single feature — just describe what you want built
+./launch.sh single "Add a logout button to the dashboard header"
 
-# Open Claude Code and paste SINGLE_FEATURE_BUILDER.md
-# followed by your feature description
+# Single feature — longer description from a file
+./launch.sh single --file my-feature.md
+
+# Full project — plans and builds everything from /docs
+./launch.sh multi
+
+# Resume — pick up where a previous run left off
+./launch.sh resume
 ```
 
-### Option B: Build an Entire Project
+That's it. No permissions prompts, no human interaction. Fully autonomous from start to finish.
 
-```bash
-# Copy orchestra files
-cp -r /path/to/orchestra/orchestra.sh .
-cp -r /path/to/orchestra/agents ./agents
+> **Tip:** If you prefer `./launch` without the `.sh`, create an alias: `alias launch='./launch.sh'`
 
-# Add your project docs
-mkdir docs
-# Add requirements.md, architecture.md, etc.
+## How It Works
 
-# Open Claude Code and paste MULTI_FEATURE_BUILDER.md
-# OR paste CLAUDE_CODE_ORCHESTRATOR.md
-```
+Orchestra follows a spec-driven pipeline. Every piece of code traces back to a specification, and every specification traces back to your requirements.
 
-From there, it runs hands-free.
-
----
-
-## Architecture
+### Single Feature Flow (two phases)
 
 ```
-CLAUDE_CODE_ORCHESTRATOR.md        ← Slim dispatcher prompt
-prompts/
-├── SINGLE_FEATURE_BUILDER.md      ← One feature → full pipeline
-└── MULTI_FEATURE_BUILDER.md       ← Full project → autonomous build
-orchestra.sh                       ← Decision-making brain
-agents/
-├── planning-agent.md              ← Constitution + specs
-├── feature-agent.md               ← Features with test plans
-├── task-builder-agent.md          ← Tasks with Playwright plans
-├── developer-agent.md             ← Backend code (4 modes)
-├── ui-developer-agent.md          ← Frontend code + data-testid
-├── code-reviewer-agent.md         ← Reviews + integration + UI checks
-├── tester-agent.md                ← Functional tests
-├── ui-tester-agent.md             ← Playwright browser tests
-├── integration-tester-agent.md    ← Cross-component tests
-└── task-reviewer-agent.md         ← After Action Reports
-.orchestra/                        ← Created at runtime
-├── constitution.md
+PHASE 1 — PLANNING (runs once)
+  Your description
+      ↓
+  Single Feature Planner Agent → creates ALL of:
+      → spec file (technical how)
+      → feature file (what to build)
+      → task files (atomic work items)
+      → all planning signals
+
+PHASE 2 — DEVELOPMENT (loops until done)
+  ./orchestra.sh next → reads signals, sees planning is done, jumps to dev
+      ↓
+  Developer Agent     → writes code + unit tests
+      ↓
+  Code Reviewer Agent → approves or rejects
+      ↓
+  Tester Agent        → runs functional tests
+      ↓
+  Task Reviewer Agent → after action report
+```
+
+Phase 1 runs once. Phase 2 loops through `./orchestra.sh next` which skips planning/feature/task creation (those signals already exist) and goes straight to spawning developer agents.
+
+### Multi Feature Flow
+
+```
+Planning Agent      → constitution.md + spec files
+    ↓
+Feature Agent       → feature files (what to build)
+    ↓
+Task Builder Agent  → task files per feature (how to build it)
+    ↓
+[same dev loop as above, per task]
+```
+
+### The Dev Loop (both modes)
+
+If the reviewer rejects code, the developer gets the rejection reasons and tries again. If tests fail, the developer gets the failure details and fixes. This loop continues until the task passes all gates.
+
+## File Structure
+
+```
+orchestra/
+├── launch.sh                       # Entry point — start here
+├── orchestra.sh                    # Decision engine (agents don't touch this)
+├── CLAUDE_CODE_ORCHESTRATOR.md     # Standard orchestrator prompt
+├── README.md
+├── agents/
+│   ├── planning-agent.md           # Creates constitution & specs
+│   ├── feature-agent.md            # Decomposes specs into features
+│   ├── single-feature-planner-agent.md  # Scoped planner for single features
+│   ├── task-builder-agent.md       # Breaks features into atomic tasks
+│   ├── developer-agent.md          # Writes code
+│   ├── ui-developer-agent.md       # Writes UI code (React, etc.)
+│   ├── code-reviewer-agent.md      # Reviews for quality & standards
+│   ├── tester-agent.md             # Functional & integration testing
+│   └── task-reviewer-agent.md      # After action reports
+└── prompts/
+    ├── SINGLE_FEATURE_BUILDER.md   # Orchestrator prompt for single features
+    └── MULTI_FEATURE_BUILDER.md    # Orchestrator prompt for full projects
+```
+
+When running, Orchestra creates a `.orchestra/` directory in your project:
+
+```
+.orchestra/
+├── constitution.md                 # Coding standards & patterns
+├── tmp/
+│   └── feature-description.md      # Your feature description (single mode)
 ├── specs/
+│   └── *.spec.md                   # Technical specifications
 ├── features/
+│   └── *.feature.md                # Feature definitions
 ├── tasks/
+│   └── *.task.md                   # Atomic task definitions
 ├── reviews/
+│   └── *.review.md                 # Code review reports
 ├── tests/
+│   └── *.test-report.md            # Test results
 ├── aar/
-├── signals/
-│   ├── dev/
-│   ├── review/
-│   ├── test/
-│   ├── integration/
-│   ├── planning/
-│   ├── feature/
-│   ├── task/
-│   └── aar/
-├── secrets.env
-└── tmp/
+│   └── *.aar.md                    # After action reports
+└── signals/
+    ├── dev/                        # Developer completion signals
+    ├── review/                     # Code review signals
+    ├── test/                       # Test signals
+    ├── tasks/                      # Task builder signals
+    ├── features/                   # Feature planning signals
+    └── aar/                        # After action report signals
 ```
 
----
+## Naming Convention
 
-## How Sub-Agents Are Spawned
+All files use descriptive, slug-based names derived from the feature or task content. No generic `task-01` or `feature-01` names.
+
+The planner derives a slug from your feature description — a short, lowercase, hyphenated summary:
+
+| Feature Description | Slug |
+|---|---|
+| "Fix the rate limiter tests by adding a clock abstraction" | `rate-limiter-test-fix` |
+| "Add logout button to dashboard header" | `dashboard-logout-button` |
+| "Implement case creation workflow" | `case-creation-workflow` |
+
+That slug flows through every artifact:
+
+```
+Spec:     .orchestra/specs/single-rate-limiter-test-fix.spec.md
+Feature:  .orchestra/features/single-rate-limiter-test-fix.feature.md
+Tasks:    .orchestra/tasks/single-rate-limiter-test-fix-01-clock-interface.task.md
+          .orchestra/tasks/single-rate-limiter-test-fix-02-inject-into-limiter.task.md
+          .orchestra/tasks/single-rate-limiter-test-fix-03-update-unit-tests.task.md
+Signals:  .orchestra/signals/dev/dev-single-rate-limiter-test-fix-01-clock-interface-complete.signal
+          .orchestra/signals/review/review-single-rate-limiter-test-fix-01-clock-interface-complete.signal
+          .orchestra/signals/tasks/tasks-single-rate-limiter-test-fix-complete.signal
+```
+
+Task names also include a descriptor after the sequence number — `01-clock-interface`, not just `01`.
+
+## Modes
+
+### Single Feature
+
+Builds one feature from a description you provide. Your description gets saved to `.orchestra/tmp/feature-description.md` — this file becomes the single source of truth that every downstream agent is scope-locked to.
 
 ```bash
-# Generate the prompt file
-./orchestra.sh spawn developer .orchestra/tasks/01-01-login.task.md 01-01-login
-
-# Spawn via stdin pipe
-cat .orchestra/tmp/developer-01-01-login-*.md | claude --dangerously-skip-permissions --allowedTools "Edit,Write,Bash,Read,MultiTool" -p -
+./launch.sh single "Fix the rate limiter tests by adding a clock abstraction"
 ```
 
-For parallel batches:
+Or with a file for longer descriptions:
+
 ```bash
-cat /path/to/prompt1.md | claude --dangerously-skip-permissions --allowedTools "Edit,Write,Bash,Read,MultiTool" -p - &
-cat /path/to/prompt2.md | claude --dangerously-skip-permissions --allowedTools "Edit,Write,Bash,Read,MultiTool" -p - &
-wait
+./launch.sh single --file feature-description.md
 ```
 
----
+From that description, the pipeline creates:
+
+```
+.orchestra/tmp/feature-description.md          ← Your description (saved by launch.sh)
+    ↓
+.orchestra/specs/single-{name}.spec.md         ← Technical spec (scope-locked to description)
+    ↓
+.orchestra/features/single-{name}.feature.md   ← Feature definition (references the spec)
+    ↓
+.orchestra/tasks/{name}-01-{task}.task.md       ← Atomic tasks (trace back to spec sections)
+```
+
+**Scope lock:** Every file in this chain is constrained to your description. Downstream agents can only work within that scope — they won't discover unrelated work from your project specs.
+
+### Multi Feature
+
+Plans and builds the entire project from documentation in your `/docs` directory. The planning agent reads your docs, creates a constitution and specs, then the feature agent decomposes everything into buildable features.
+
+```bash
+./launch.sh multi
+```
+
+Put your requirements, PRDs, design docs, or any project documentation in `/docs` before running.
+
+### Resume
+
+Picks up an existing orchestration from where it left off. Reads the signal files to figure out what's done and what's next.
+
+```bash
+./launch.sh resume
+```
+
+## Setup
+
+1. Copy the orchestra files into your project (or keep them in a separate directory and reference them):
+
+```bash
+cp -r /path/to/orchestra /your/project/
+cd /your/project
+chmod +x orchestra/launch.sh orchestra/orchestra.sh
+```
+
+2. For **multi** mode, add your project documentation to `/docs`:
+
+```bash
+mkdir -p docs
+# Add your requirements, PRDs, technical specs, etc.
+```
+
+3. Run:
+
+```bash
+./orchestra/launch.sh single "your feature description"
+# or
+./orchestra/launch.sh multi
+```
+
+## Architecture Decisions
+
+**Why a shell script as the brain?** `orchestra.sh` handles all decision logic (which agent to spawn next, signal checking, cleanup). This keeps the orchestrator's Claude Code context window small — it just runs the script and acts on the output instead of reasoning about state.
+
+**Why file-based signals?** Signals are the coordination mechanism between agents. Each agent writes a signal when it finishes. The shell script reads signals to determine the next action. This is simpler and more debuggable than any in-memory state.
+
+**Why `launch.sh`?** Two reasons. First, Claude Code only skips permissions when launched via CLI with `--dangerously-skip-permissions`. Pasting a prompt into an interactive session will always prompt for approval. Second, `launch.sh` uses `--system-prompt-file` with an initial message argument instead of `cat | claude -p -`. The `-p` (print) flag runs in non-interactive mode with no live output — you'd see nothing until it finishes. Using `--system-prompt-file` launches the full Claude Code TUI so you see everything streaming in real-time.
+
+**Why scope locking?** Without explicit scope constraints, agents that read all project specs will plan work for the entire project — even when you only asked for one feature. The scope lock chain (description → spec → feature → tasks) ensures each layer can only reference what the layer above defined.
+
+## Parallelization
+
+Orchestra can run independent work in parallel:
+
+| Parallel OK | Must Be Sequential |
+|---|---|
+| Task builders for different features | Planning → Features → Tasks (init) |
+| Developers for independent tasks | Dev → Review → Test (per task) |
+| Task reviewers for completed features | |
+
+## Monitoring
+
+```bash
+# Full status dashboard
+./orchestra.sh status
+
+# Check signals
+ls -la .orchestra/signals/*/
+
+# Check a specific signal
+cat .orchestra/signals/dev/dev-{task-name}-complete.signal
+```
+
+## Troubleshooting
+
+**"File not found" when using `--file`?**
+`launch.sh` auto-searches multiple locations: the path you gave, `.orchestra/tmp/`, `prompts/`, and the script directory. If it still can't find the file, it lists what's available in `.orchestra/tmp/` so you can see the right name. You can use just the filename — no need for the full path:
+```bash
+# All of these work if the file is in .orchestra/tmp/:
+./launch.sh single --file fix-clock-tests-feature.md
+./launch.sh single --file .orchestra/tmp/fix-clock-tests-feature.md
+```
+
+**No output or feedback in the terminal?**
+Make sure you're using the latest `launch.sh`. Older versions used `cat | claude -p -` which runs in print mode with no live output. The current version uses `--system-prompt-file` which launches Claude Code's full TUI with real-time streaming.
+
+**Agent keeps rebuilding the whole project in single-feature mode?**
+Make sure you're using the updated `single-feature-planner-agent.md` with the scope lock. The feature file should contain `Mode: SINGLE FEATURE` in its Scope Lock section.
+
+**Main thread asking for permissions?**
+Use `./launch.sh` instead of pasting prompts into Claude Code. The launcher starts the orchestrator with `--dangerously-skip-permissions`.
+
+**Orchestrator loops back to planning instead of dev?**
+The planner must create task files AND the tasks signal in one pass. Check that `.orchestra/signals/tasks/tasks-*-complete.signal` exists after the planner finishes. If not, the planner agent needs updating.
+
+**Stuck in a review/test loop?**
+After 3 rejections on the same task, the orchestrator escalates to you. Check the review/test reports in `.orchestra/reviews/` and `.orchestra/tests/` for patterns.
+
+**Sub-agents can't run bash commands?**
+Make sure sub-agents are spawned with `--allowedTools "Edit,Write,Bash,Read,MultiTool"`. The launcher and orchestrator prompts handle this automatically.
+
+**Orchestrator exited unexpectedly?**
+Run `./launch.sh resume` to pick up where it left off. It reads the signal files and figures out what's done and what's next.
 
 ## License
 
