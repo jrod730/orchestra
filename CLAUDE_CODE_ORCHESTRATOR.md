@@ -67,6 +67,59 @@ wait
 ```
 Then `./orchestra.sh next`.
 
+### TRACK-BASED OUTPUT (Phase 4 Dev Loop)
+
+When `./orchestra.sh next` outputs TRACK blocks (indicated by `TRACK:` prefix and `TRACK_COUNT:` footer), this is the dev loop running in parallel across features. **Each track has its OWN agent type** — one track might need a developer while another needs a code-reviewer or tester.
+
+Parse each `---`-separated TRACK block and process them:
+
+**For each TRACK block:**
+1. Read the ACTION within the track (SPAWN or CLEANUP_THEN_SPAWN)
+2. If CLEANUP_THEN_SPAWN: run `./orchestra.sh cleanup <TASK_NAME>` first
+3. Run `./orchestra.sh spawn <AGENT> <TARGET> <TASK_NAME>` using **that track's AGENT value**
+4. Note the PROMPT_FILE
+
+**After generating all prompt files, spawn ALL in parallel:**
+```bash
+cat <path1> | claude --dangerously-skip-permissions --allowedTools "Edit,Write,Bash,Read,MultiTool" -p - &
+cat <path2> | claude --dangerously-skip-permissions --allowedTools "Edit,Write,Bash,Read,MultiTool" -p - &
+wait
+```
+Then `./orchestra.sh next`.
+
+**CRITICAL: Each track's AGENT may be DIFFERENT.** Do not assume all tracks use the same agent. Example:
+```
+TRACK:01                      ← Feature 01 needs code review
+ACTION:SPAWN
+AGENT:code-reviewer           ← THIS agent
+TARGET:.orchestra/tasks/01-01-models.task.md
+TASK_NAME:01-01-models
+---
+TRACK:02                      ← Feature 02 needs development
+ACTION:SPAWN
+AGENT:developer               ← DIFFERENT agent
+TARGET:.orchestra/tasks/02-01-layout.task.md
+TASK_NAME:02-01-layout
+MODE:fresh
+---
+TRACK_COUNT:2
+PHASE:4-dev-loop
+```
+
+For this output you would:
+```bash
+./orchestra.sh spawn code-reviewer .orchestra/tasks/01-01-models.task.md 01-01-models
+# → PROMPT_FILE:/path/to/code-reviewer-01-01-models.md
+./orchestra.sh spawn developer .orchestra/tasks/02-01-layout.task.md 02-01-layout
+# → PROMPT_FILE:/path/to/developer-02-01-layout.md
+
+cat /path/to/code-reviewer-01-01-models.md | claude --dangerously-skip-permissions --allowedTools "Edit,Write,Bash,Read,MultiTool" -p - &
+cat /path/to/developer-02-01-layout.md | claude --dangerously-skip-permissions --allowedTools "Edit,Write,Bash,Read,MultiTool" -p - &
+wait
+
+./orchestra.sh next
+```
+
 ### ACTION:CLEANUP_THEN_SPAWN
 ```bash
 ./orchestra.sh cleanup <TASK_NAME>
@@ -110,6 +163,7 @@ Each cycle, your ENTIRE response: 2-3 lines MAX.
 4. **Never use the Task tool.** It cannot pass `--dangerously-skip-permissions`.
 5. **Never ask permission.** Just execute.
 6. **Never stop the loop** unless the action table says STOP.
+7. **In Phase 4 TRACK output, ALWAYS use each track's specific AGENT value.** Never substitute one agent type for another.
 
 ## BEGIN
 
