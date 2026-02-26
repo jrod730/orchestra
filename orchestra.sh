@@ -210,8 +210,8 @@ all_feature_tasks_passed() {
 cmd_init() {
     log "Initializing Orchestra v2.1 project structure..."
 
-    mkdir -p "$SIGNALS_DIR"/{dev,review,test,integration,planning,feature,task,aar}
-    mkdir -p "$ORCHESTRA_DIR"/{specs,features,tasks,reviews,tests,aar,tmp}
+    mkdir -p "$SIGNALS_DIR"/{dev,review,test,integration,planning,feature,task,aar,approval}
+    mkdir -p "$ORCHESTRA_DIR"/{specs,features,tasks,reviews,tests,aar,approval,tmp}
     mkdir -p "$PROJECT_ROOT/docs" "$PROJECT_ROOT/src" "$PROJECT_ROOT/tests"
     mkdir -p "$PROJECT_ROOT/tests/e2e"
     mkdir -p "$PROJECT_ROOT/tests/integration"
@@ -592,6 +592,94 @@ cmd_next() {
         return 0
     fi
 
+    # ══════════════════════════════════════════════════════════════
+    # Phase 4.8: User Approval — HUMAN-IN-THE-LOOP GATE
+    #
+    # After all tasks pass and integration tests pass (if required),
+    # spawn a feature-completion agent to generate test cases, then
+    # pause for user approval before writing AARs.
+    #
+    # Signal states:
+    #   NONE     → spawn feature-completion agent to generate test cases
+    #   PENDING  → present test cases to user, ask for approval
+    #   APPROVED → proceed to AARs
+    # ══════════════════════════════════════════════════════════════
+
+    local approval_batch_items=()
+    local approval_batch_count=0
+    local has_pending_approval=false
+    local pending_approval_feature=""
+    local pending_approval_file=""
+
+    for feature in "$ORCHESTRA_DIR/features"/*.feature.md; do
+        [ -f "$feature" ] || continue
+        local fname
+        fname=$(feature_name_from_file "$feature")
+
+        all_feature_tasks_passed "$fname" || continue
+
+        if has_integration_tasks "$fname"; then
+            local int_sig
+            int_sig=$(signal_path "integration" "${fname}-complete")
+            [ "$(read_signal "$int_sig")" != "PASSED" ] && continue
+        fi
+
+        local approval_sig
+        approval_sig=$(signal_path "approval" "approval-${fname}-complete")
+        local approval_status
+        approval_status=$(read_signal "$approval_sig")
+
+        if [ "$approval_status" = "NONE" ]; then
+            # Need to generate test cases
+            approval_batch_items+=("$feature|$fname")
+            approval_batch_count=$((approval_batch_count + 1))
+        elif [ "$approval_status" = "PENDING" ]; then
+            # Test cases generated, waiting for user approval
+            has_pending_approval=true
+            pending_approval_feature="$fname"
+            pending_approval_file="$feature"
+        fi
+        # APPROVED → falls through to Phase 5
+    done
+
+    # Spawn feature-completion agents for features needing test case generation
+    if [ "$approval_batch_count" -eq 1 ]; then
+        local item="${approval_batch_items[0]}"
+        local feat_file="${item%%|*}"
+        local feat_name="${item##*|}"
+        echo "ACTION:SPAWN"
+        echo "AGENT:feature-completion"
+        echo "TARGET:$feat_file"
+        echo "FEATURE_NAME:$feat_name"
+        echo "PHASE:4.8-user-approval"
+        return 0
+    elif [ "$approval_batch_count" -gt 1 ]; then
+        echo "ACTION:SPAWN_BATCH"
+        echo "COUNT:$approval_batch_count"
+        echo "PHASE:4.8-user-approval"
+        local idx=1
+        for item in "${approval_batch_items[@]}"; do
+            local feat_file="${item%%|*}"
+            local feat_name="${item##*|}"
+            echo "BATCH_ITEM:$idx"
+            echo "AGENT:feature-completion"
+            echo "TARGET:$feat_file"
+            echo "FEATURE_NAME:$feat_name"
+            idx=$((idx + 1))
+        done
+        return 0
+    fi
+
+    # Present pending approval to user
+    if [ "$has_pending_approval" = true ]; then
+        echo "ACTION:USER_APPROVAL"
+        echo "FEATURE_NAME:$pending_approval_feature"
+        echo "TEST_CASES:.orchestra/approval/${pending_approval_feature}.test-cases.md"
+        echo "APPROVAL_SIGNAL:$SIGNALS_DIR/approval/approval-${pending_approval_feature}-complete.signal"
+        echo "PHASE:4.8-user-approval"
+        return 0
+    fi
+
     # Phase 5: AARs
     local aar_batch_items=()
     local aar_batch_count=0
@@ -607,6 +695,11 @@ cmd_next() {
             int_sig=$(signal_path "integration" "${fname}-complete")
             [ "$(read_signal "$int_sig")" != "PASSED" ] && continue
         fi
+
+        # Must also have user approval before AAR
+        local approval_sig
+        approval_sig=$(signal_path "approval" "approval-${fname}-complete")
+        [ "$(read_signal "$approval_sig")" != "APPROVED" ] && continue
 
         local aar_sig
         aar_sig=$(signal_path "aar" "aar-${fname}-complete")
@@ -1049,6 +1142,24 @@ $(cat "$prior_task")
             fi
             ;;
 
+        feature-completion)
+            # Needs: feature, all tasks, all reviews, all test reports, integration report
+            # Same context as task-reviewer — the agent needs full feature history to generate test cases
+            if [ -n "$feature_name" ]; then
+                inject_file "FEATURE FOR APPROVAL" "$target"
+
+                local feat_prefix
+                feat_prefix=$(echo "$feature_name" | cut -d'-' -f1)
+
+                inject_glob "TASK" "$ORCHESTRA_DIR/tasks/${feat_prefix}-*.task.md"
+                inject_glob "CODE REVIEW" "$ORCHESTRA_DIR/reviews/${feat_prefix}-*.review*.md"
+                inject_glob "TEST REPORT" "$ORCHESTRA_DIR/tests/${feat_prefix}-*.test-report*.md"
+
+                # Integration test report if exists
+                inject_file "INTEGRATION TEST REPORT" "$ORCHESTRA_DIR/tests/${feature_name}.integration-report.md"
+            fi
+            ;;
+
     esac
 
     # ── Assemble final prompt ──
@@ -1174,6 +1285,30 @@ cmd_status() {
     done
     [ "$has_any_integration" = true ] && echo ""
 
+    # User Approval status
+    local has_any_approval=false
+    for feature in "$ORCHESTRA_DIR/features"/*.feature.md; do
+        [ -f "$feature" ] || continue
+        local fname
+        fname=$(feature_name_from_file "$feature")
+        local approval_sig
+        approval_sig=$(signal_path "approval" "approval-${fname}-complete")
+        local approval_s
+        approval_s=$(read_signal "$approval_sig")
+        if [ "$approval_s" != "NONE" ]; then
+            if [ "$has_any_approval" = false ]; then
+                echo -e "  ${BOLD}USER APPROVAL${NC}"
+                has_any_approval=true
+            fi
+            case "$approval_s" in
+                APPROVED) echo -e "    ${GREEN}✓${NC} $fname: ${GREEN}APPROVED${NC}" ;;
+                PENDING)  echo -e "    ${YELLOW}⏳${NC} $fname: ${YELLOW}PENDING${NC} — test cases at .orchestra/approval/${fname}.test-cases.md" ;;
+                *)        echo -e "    ${YELLOW}○${NC} $fname: $approval_s" ;;
+            esac
+        fi
+    done
+    [ "$has_any_approval" = true ] && echo ""
+
     echo -e "  ${BOLD}AFTER ACTION REPORTS${NC}"
     for feature in "$ORCHESTRA_DIR/features"/*.feature.md; do
         [ -f "$feature" ] || continue
@@ -1242,6 +1377,12 @@ Phase 4 Output Format (TRACK-based):
 Inner Loop (strictly enforced per task):
   dev → review → test → next task
   A task CANNOT advance until test=PASSED.
+
+User Approval (Phase 4.8):
+  After all tasks pass + integration tests pass, Orchestra generates
+  test cases (happy + unhappy paths) and pauses for user approval.
+  The user reviews the test cases, runs functional tests, then approves.
+  A feature CANNOT proceed to AAR until user approves.
 
 Parallelism:
   Within feature:   SEQUENTIAL (task N+1 waits for N)
