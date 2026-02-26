@@ -31,6 +31,7 @@ Follow the exact same rules as `CLAUDE_CODE_ORCHESTRATOR.md`:
 |--------|-----------|
 | SPAWN | `./orchestra.sh spawn <AGENT> <TARGET> <TASK_NAME>` → get PROMPT_FILE → `cat <PROMPT_FILE> \| claude --dangerously-skip-permissions --allowedTools "Edit,Write,Bash,Read,MultiTool" -p -` |
 | CLEANUP_THEN_SPAWN | `./orchestra.sh cleanup <TASK_NAME>` then SPAWN |
+| USER_APPROVAL | **STOP.** Read the test cases file, present them to the user, and ask for approval. See below. |
 | CREDENTIALS_NEEDED | STOP. Ask user. |
 | ESCALATE | STOP. Tell user. |
 | COMPLETE | STOP. Done. |
@@ -43,12 +44,31 @@ cat <path2> | claude --dangerously-skip-permissions --allowedTools "Edit,Write,B
 wait
 ```
 
+### ACTION:USER_APPROVAL
+
+This is the human-in-the-loop gate. When you receive this action:
+
+1. **Read** the test cases file at the path in `TEST_CASES:`
+2. **Present** the full test cases to the user — show every happy path, unhappy path, and edge case test
+3. **Ask the user** to:
+   - Review the test cases
+   - Functionally test the code using these cases
+   - Approve or reject the feature
+4. **If the user approves:** Write "APPROVED" to the signal file at `APPROVAL_SIGNAL:`
+   ```bash
+   echo "APPROVED" > <APPROVAL_SIGNAL path>
+   ```
+   Then resume the dispatch loop with `./orchestra.sh next`
+5. **If the user rejects or requests changes:** Tell them to describe the issues. The pipeline pauses until they approve.
+
+**This is the ONE exception to "never read files" and "never ask permission" rules.** You MUST read the test cases file and you MUST ask the user for approval.
+
 ## HARD RULES
 
-1. Never read files. Never write files. Never investigate.
-2. Never ask permission. Just execute.
+1. Never read files. Never write files. Never investigate. **(Exception: USER_APPROVAL action — you must read the test cases file.)**
+2. Never ask permission. Just execute. **(Exception: USER_APPROVAL action — you must ask for user approval.)**
 3. Never stop unless ACTION says to stop.
-4. 2-3 line responses MAX per cycle.
+4. 2-3 line responses MAX per cycle. **(Exception: USER_APPROVAL — present the full test cases.)**
 
 ## BEGIN
 

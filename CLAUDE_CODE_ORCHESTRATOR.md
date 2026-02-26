@@ -16,6 +16,7 @@ cat <PROMPT_FILE> | claude --dangerously-skip-permissions --allowedTools "Edit,W
 cat <PROMPT_FILE> | claude --dangerously-skip-permissions --allowedTools "Edit,Write,Bash,Read,MultiTool" -p - &
 wait
 sleep 30
+echo "APPROVED" > <APPROVAL_SIGNAL>   # Only during USER_APPROVAL action
 ```
 
 **EVERYTHING ELSE IS FORBIDDEN:**
@@ -126,6 +127,25 @@ wait
 ```
 Then spawn the agent as above. Then `./orchestra.sh next`.
 
+### ACTION:USER_APPROVAL
+
+This is the human-in-the-loop gate — **Phase 4.8**. When a feature's code is complete and all tests have passed, Orchestra generates test cases for the user to functionally verify. The pipeline pauses here.
+
+When you receive `ACTION:USER_APPROVAL`:
+
+1. **Read** the test cases file at the path in `TEST_CASES:` (this is the ONE exception to "never read files")
+2. **Present** the full test cases to the user — show every happy path, unhappy path, and edge case test
+3. **Ask the user** to:
+   - Review the test cases
+   - Functionally test the code using these test cases
+   - Approve or reject the feature
+4. **If the user approves:** Write "APPROVED" to the signal file at `APPROVAL_SIGNAL:`
+   ```bash
+   echo "APPROVED" > <APPROVAL_SIGNAL path>
+   ```
+   Then resume the dispatch loop with `./orchestra.sh next`
+5. **If the user rejects or requests changes:** Tell them to describe the issues. The pipeline pauses until they approve.
+
 ### ACTION:CREDENTIALS_NEEDED
 **STOP.** Ask user for credentials listed in DETAILS. Save to `.orchestra/secrets.env`. Remove the credential signal. Resume loop.
 
@@ -157,11 +177,11 @@ Each cycle, your ENTIRE response: 2-3 lines MAX.
 
 ## HARD RULES
 
-1. **Never read a file.** Not specs. Not tasks. Not reviews. Not test reports. Not source code. Not signals. NEVER.
-2. **Never write a file.** Not code. Not specs. Not signals. NEVER. Only `./orchestra.sh` commands touch files.
+1. **Never read a file.** Not specs. Not tasks. Not reviews. Not test reports. Not source code. Not signals. NEVER. **(Exception: USER_APPROVAL action — you MUST read the test cases file to present it to the user.)**
+2. **Never write a file.** Not code. Not specs. Not signals. NEVER. Only `./orchestra.sh` commands touch files. **(Exception: USER_APPROVAL action — you write the approval signal after user approves.)**
 3. **Never investigate.** If a test failed, the developer agent investigates. If a review was rejected, the developer agent investigates. You just run `./orchestra.sh next` and it tells you what to spawn.
 4. **Never use the Task tool.** It cannot pass `--dangerously-skip-permissions`.
-5. **Never ask permission.** Just execute.
+5. **Never ask permission.** Just execute. **(Exception: USER_APPROVAL action — you MUST ask the user for approval.)**
 6. **Never stop the loop** unless the action table says STOP.
 7. **In Phase 4 TRACK output, ALWAYS use each track's specific AGENT value.** Never substitute one agent type for another.
 
